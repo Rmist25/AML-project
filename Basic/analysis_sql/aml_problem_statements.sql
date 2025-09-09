@@ -47,33 +47,81 @@ WHERE EXISTS (
 -- =====================
 -- 1. List all customers with 'high' risk rating.
 --    Overview: Identify customers flagged as high risk for AML monitoring.
+ SELECT *
+ FROM customers
+ WHERE risk_rating = 'high';
+
 
 -- 2. Find the top 5 branches by number of accounts.
 --    Overview: See which branches have the most customer accounts.
+SELECT TOP 5 branch_id, COUNT(account_id) AS account_count
+FROM accounts
+GROUP BY branch_id
+ORDER BY account_count DESC;
+
 
 -- 3. Show all transactions above $10,000.
 --    Overview: Large transactions may require regulatory reporting.
 
+SELECT *
+FROM transactions
+WHERE amount > 10000
+ORDER BY amount DESC;
+
 -- 4. List customers who have not updated their KYC in the last 2 years.
 --    Overview: Spot customers overdue for KYC refresh.
+
+SELECT *
+FROM customers
+WHERE customer_id NOT IN (
+	SELECT customer_id
+	FROM kyc_updates
+	WHERE update_date >= DATEADD(year, -2, GETDATE())
+);
+
 
 -- 5. Count the number of accounts per customer.
 --    Overview: Understand customer account distribution.
 
+SELECT customer_id, COUNT(account_id) AS account_count
+FROM accounts
+GROUP BY customer_id;
+
 -- 6. List all accounts that are currently 'frozen'.
 --    Overview: Identify accounts with restricted activity.
+
+SELECT *
+FROM accounts
+WHERE status = 'frozen';
 
 -- 7. Find the total transaction amount for each account in the last month.
 --    Overview: Recent account activity summary.
 
+SELECT account_id, SUM(amount) AS sum_amount
+FROM transactions
+WHERE transaction_date >= DATEADD(MONTH, -1, GETDATE())
+GROUP BY account_id
+ORDER BY sum_amount DESC;
+
 -- 8. List all alerts that are still 'open'.
 --    Overview: Track unresolved AML alerts.
 
+SELECT *
+FROM alerts
+WHERE status = 'open';
+
 -- 9. Show all transactions made via 'ATM' channel.
 --    Overview: Analyze ATM-based activity.
+SELECT *
+FROM transactions
+WHERE channel = 'ATM';
 
 -- 10. List all countries marked as high risk.
 --     Overview: Reference for geographic risk analysis.
+
+SELECT *
+FROM countries
+WHERE is_high_risk = 1;
 
 -- =====================
 -- MEDIUM LEVEL (11-20)
