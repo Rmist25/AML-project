@@ -128,33 +128,102 @@ WHERE is_high_risk = 1;
 -- =====================
 -- 11. Find customers with more than 3 accounts.
 --     Overview: Multiple accounts may indicate structuring or layering.
+SELECT customer_id, COUNT(account_id) AS account_count
+FROM accounts
+GROUP BY customer_id
+HAVING COUNT(account_id) > 3;
+
 
 -- 12. List accounts with more than 5 transactions in a single day.
 --     Overview: High-frequency activity may be suspicious.
 
+SELECT account_id, transaction_date, COUNT(transaction_id) AS txn_count
+FROM transactions
+GROUP BY account_id, transaction_date
+HAVING COUNT(transaction_id) > 1;
+
+SELECT account_id, transaction_date, COUNT(transaction_date) AS transaction_count
+FROM transactions
+GROUP BY account_id, transaction_date
+HAVING COUNT(transaction_date) > 5
+ORDER BY transaction_count DESC;
+
 -- 13. Identify customers whose accounts have been closed in the last year.
 --     Overview: Track recent account closures for review.
+SELECT *
+FROM accounts
+WHERE status = 'closed' AND close_date >= DATEADD(year, -1, GETDATE());
+
+
 
 -- 14. Find transactions just below $10,000 (e.g., $9,000-$9,999).
 --     Overview: Spot possible structuring to avoid reporting.
+SELECT *
+FROM transactions
+WHERE amount >= 9000 AND amount < 10000
+
 
 -- 15. List customers who have received AML alerts more than once.
 --     Overview: Repeat alerts may indicate ongoing risk.
 
+SELECT customer_id, COUNT(alert_id) AS alert_count
+FROM alerts
+GROUP BY customer_id
+HAVING COUNT(alert_id) > 1
+ORDER BY alert_count DESC;
+
+
 -- 16. Show the average transaction amount per branch.
 --     Overview: Compare transaction sizes across branches.
 
+SELECT branches.branch_id, AVG(transactions.amount) AS avg_amount
+FROM transactions
+JOIN accounts
+ON transactions.account_id = accounts.account_id
+JOIN branches 
+ON accounts.branch_id = branches.branch_id
+GROUP BY branches.branch_id
+ORDER BY avg_amount DESC;
+
 -- 17. Find accounts with both 'credit' and 'debit' transactions on the same day.
 --     Overview: Rapid in-and-out movement of funds.
+SELECT account_id, transaction_date
+FROM transactions	
+GROUP BY account_id, transaction_date
+HAVING COUNT(DISTINCT transaction_type) = 2
+ORDER BY account_id, transaction_date;
+
 
 -- 18. List all transactions involving high-risk countries.
 --     Overview: Monitor cross-border risk exposure.
 
+SELECT t.*
+FROM transactions AS t
+JOIN customers AS cu ON t.account_id = cu.customer_id
+JOIN countries AS c ON cu.country_code= c.country_code
+WHERE c.is_high_risk = 1;
+
 -- 19. Identify customers whose KYC status is 'failed' and have active accounts.
 --     Overview: Compliance risk from non-verified customers.
 
+SELECT *
+FROM customers
+WHERE kyc_status = 'failed' AND customer_id IN (
+    SELECT DISTINCT customer_id
+    FROM accounts
+    WHERE status = 'active'
+);
+
+
 -- 20. Find the top 10 customers by total transaction value in the last year.
 --     Overview: High-value customers for enhanced due diligence.
+
+SELECT TOP 10 cu.customer_id, SUM(t.amount) AS total_transaction_value
+FROM transactions AS t
+JOIN customers AS cu ON t.account_id = cu.customer_id
+WHERE t.transaction_date >= DATEADD(year, -1, GETDATE())
+GROUP BY cu.customer_id
+ORDER BY total_transaction_value DESC;
 
 -- =====================
 -- TOUGH LEVEL (21-30)
@@ -162,12 +231,32 @@ WHERE is_high_risk = 1;
 -- 21. Detect accounts with frequent deposits just below the reporting threshold over multiple days.
 --     Overview: Advanced structuring/smurfing detection.
 
+SELECT account_id, transaction_date, COUNT(transaction_id) AS txn_count, SUM(amount) AS total_amount
+FROM transactions
+WHERE amount >= 9000 AND amount < 10000
+GROUP BY account_id, transaction_date
+HAVING COUNT(transaction_id) > 1;
+
 -- 22. Identify accounts with rapid movement of funds (in and out within 24 hours).
 --     Overview: Layering activity to obscure money trail.
+
+SELECT account_id, transaction_date, COUNT(transaction_id) AS txn_count, SUM(amount) AS total_amount
+FROM transactions
+WHERE amount >= 9000 AND amount < 10000
+GROUP BY account_id, transaction_date
+HAVING COUNT(transaction_id) > 1;
 
 -- 23. Find dormant accounts (no activity for 1 year) that suddenly show large transactions.
 --     Overview: Dormant account reactivation risk.
 
+SELECT a.account_id
+FROM accounts AS a
+WHERE a.status = 'dormant' AND a.account_id IN (
+    SELECT DISTINCT account_id
+    FROM transactions
+    WHERE transaction_date >= DATEADD(year, -1, GETDATE())
+    AND amount > 10000
+);
 -- 24. List customers who have changed their address more than twice in the last 3 years.
 --     Overview: Frequent address changes may indicate identity manipulation.
 
