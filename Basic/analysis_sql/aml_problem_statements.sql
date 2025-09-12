@@ -260,23 +260,156 @@ WHERE a.status = 'dormant' AND a.account_id IN (
 -- 24. List customers who have changed their address more than twice in the last 3 years.
 --     Overview: Frequent address changes may indicate identity manipulation.
 
+
+
 -- 25. Detect accounts with transactions involving multiple high-risk countries.
 --     Overview: Complex cross-border laundering.
 
+SELECT DISTINCT a.account_id
+FROM branches AS b
+JOIN transactions AS t ON b.branch_name = t.counterparty_bank
+JOIN accounts AS a ON t.account_id = a.account_id
+JOIN customers AS c ON a.customer_id = c.customer_id
+JOIN countries AS co ON c.country_code = co.country_code
+WHERE co.is_high_risk = 1
+
+
 -- 26. Identify customers with repeated failed KYC updates and recent high-value transactions.
 --     Overview: High compliance and AML risk.
+SELECT DISTINCT c.customer_id, c.name
+FROM customers AS c
+JOIN kyc_updates AS k ON c.customer_id = k.customer_id
+WHERE k.kyc_status = 'failed' AND k.update_date >= DATEADD(year, -1, GETDATE())
+AND c.customer_id IN (
+    SELECT DISTINCT account_id
+    FROM transactions
+    WHERE amount > 10000
+);
+ 
 
 -- 27. Find accounts with a high ratio of cash deposits to total deposits.
 --     Overview: Cash-intensive activity is a red flag.
 
+
+
 -- 28. List customers whose accounts have been frozen after an AML alert.
 --     Overview: Link between alerts and account status.
 
+SELECT DISTINCT a.account_id, a.status
+FROM accounts AS a	
+JOIN alerts AS al ON a.customer_id = al.customer_id
+WHERE a.status = 'frozen' AND al.status = 'closed';
+
+
 -- 29. Detect possible collusion: customers transferring funds back and forth between their own accounts.
 --     Overview: Circular transactions to disguise origins.
+SELECT t1.account_id AS from_account, t2.account_id AS to_account, COUNT(*) AS transfer_count
+FROM transactions AS t1
+JOIN transactions AS t2 ON t1.account_id = t2.account_id AND t1.transaction_id <> t2.transaction_id
+WHERE t1.transaction_date = t2.transaction_date
+GROUP BY t1.account_id, t2.account_id
+HAVING COUNT(*) > 1;
 
--- 30. Identify customers with transactions in multiple currencies and high-risk countries within a short period.
+-- 30. Identify customers with transactions in multiple currencies and high-risk countries within a short per iod.
 --     Overview: Sophisticated laundering using currency and geography.
+SELECT DISTINCT c.customer_id, c.name
+FROM customers AS c	
+JOIN accounts AS a ON c.customer_id = a.customer_id
+JOIN transactions AS t ON a.account_id = t.account_id
+JOIN countries AS co ON c.country_code = co.country_code
+WHERE co.is_high_risk = 1
+AND t.transaction_date >= DATEADD(month, -3, GETDATE());
 
+-- 31. For each customer, find their largest transaction and how it ranks among all customers’ largest transactions.
+SELECT
+    c.customer_id,
+    c.name,
+    MAX(t.amount) AS max_transaction,
+    RANK() OVER (ORDER BY MAX(t.amount) DESC) AS overall_rank
+FROM customers c
+JOIN accounts a ON c.customer_id = a.customer_id
+JOIN transactions t ON a.account_id = t.account_id
+GROUP BY c.customer_id, c.name;
+
+-- 32. List accounts whose average transaction amount in the last 6 months is at least twice their overall average.
+SELECT
+    account_id,
+    AVG(CASE WHEN transaction_date >= DATEADD(month, -6, GETDATE()) THEN amount END) AS avg_last_6_months,
+    AVG(amount) AS avg_overall
+FROM transactions
+GROUP BY account_id
+HAVING AVG(CASE WHEN transaction_date >= DATEADD(month, -6, GETDATE()) THEN amount END) >= 2 * AVG(amount);
+
+-- 33. Find the top 3 customers per branch by total transaction value in the past year.
+SELECT *
+FROM (
+    SELECT
+        b.branch_id,
+        c.customer_id,
+        c.name,
+        SUM(t.amount) AS total_value,
+        ROW_NUMBER() OVER (PARTITION BY b.branch_id ORDER BY SUM(t.amount) DESC) AS rn
+    FROM branches b
+    JOIN accounts a ON b.branch_id = a.branch_id
+    JOIN customers c ON a.customer_id = c.customer_id
+    JOIN transactions t ON a.account_id = t.account_id
+    WHERE t.transaction_date >= DATEADD(year, -1, GETDATE())
+    GROUP BY b.branch_id, c.customer_id, c.name
+) ranked
+WHERE rn <= 3;
+
+-- 34. Identify customers whose transaction amounts have increased by more than 50% compared to the previous month.
+WITH monthly_totals AS (
+    SELECT
+        c.customer_id,
+        FORMAT(t.transaction_date, 'yyyy-MM') AS txn_month,
+        SUM(t.amount) AS month_total
+    FROM customers c
+    JOIN accounts a ON c.customer_id = a.customer_id
+    JOIN transactions t ON a.account_id = t.account_id
+    GROUP BY c.customer_id, FORMAT(t.transaction_date, 'yyyy-MM')
+),
+monthly_with_lag AS (
+    SELECT
+        customer_id,
+        txn_month,
+        month_total,
+        LAG(month_total) OVER (PARTITION BY customer_id ORDER BY txn_month) AS prev_month_total
+    FROM monthly_totals
+)
+SELECT
+    customer_id,
+    txn_month,
+    month_total,
+    prev_month_total
+FROM monthly_with_lag
+WHERE prev_month_total IS NOT NULL
+  AND month_total > 1.5 * prev_month_total;
+
+  -- 35. For each account, show the longest streak of consecutive days with at least one transaction.
+WITH txn_days AS (
+    SELECT
+        account_id,
+        CAST(transaction_date AS DATE) AS txn_date,
+        ROW_NUMBER() OVER (PARTITION BY account_id ORDER BY CAST(transaction_date AS DATE)) AS rn
+    FROM transactions
+    GROUP BY account_id, CAST(transaction_date AS DATE)
+),
+streaks AS (
+    SELECT
+        account_id,
+        txn_date,
+        DATEADD(day, -rn, txn_date) AS streak_group
+    FROM txn_days
+)
+SELECT
+    account_id, 
+    COUNT(*) AS longest_streak
+FROM (
+    SELECT account_id, streak_group, COUNT(*) AS streak_length
+    FROM streaks
+    GROUP BY account_id, streak_group
+) streak_lengths
+GROUP BY account_id
+ORDER BY longest_streak DESC;
 -- =====================
--- Add your SQL solutions below each problem as you work through them.
